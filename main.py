@@ -1,10 +1,13 @@
+import os
 import nest_asyncio
-nest_asyncio.apply()  # Allow nesting of the event loop
+nest_asyncio.apply()  # Allow nested event loops
 
 import asyncio
-import requests
 import logging
+import requests
 from datetime import datetime
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -13,23 +16,23 @@ from telegram.ext import (
     ContextTypes
 )
 
-# Set up logging to the console
+# Configure logging to see all actions in the console
 logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
+# Global constants and configuration
 API_URL = "https://api.iticket.uz/ru/v5/events/concerts/uzbekistan-vs-kyrgyz-republic?client=web"
-TELEGRAM_BOT_TOKEN = "7619013796:AAGsMnnxSPl30BYTRUKBnomdU9VjFWngNBo"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 8000))
 
-# Dictionary to store auto-check tasks by chat_id
+# Store background auto-check tasks per chat
 auto_check_tasks = {}
 
 def check_tickets():
     """
     Check the API and return the number of available tickets.
-    Returns:
-        int: available tickets count, or None on error.
     """
     try:
         response = requests.get(API_URL)
@@ -45,9 +48,11 @@ def check_tickets():
         logging.error("Error fetching API data: %s", e)
         return None
 
+# Telegram bot handler functions
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Sends a persistent menu with buttons.
+    Handles the /start command and sends a persistent menu.
     """
     keyboard = [
         [InlineKeyboardButton("Manual Check", callback_data="manual_check")],
@@ -60,7 +65,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Handles button clicks for manual check and auto-check.
+    Handles button presses for manual check and auto-check.
     The menu remains persistent.
     """
     query = update.callback_query
@@ -68,12 +73,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = query.data
     logging.info(f"Chat {chat_id} clicked button: {action}")
 
-    # Always answer the callback to remove the "loading" state.
     if action == "manual_check":
         available_tickets = check_tickets()
         if available_tickets is None:
             await query.answer("Error fetching data.", show_alert=True)
         elif available_tickets > 0:
+            # Send a notification only if tickets are available.
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"Tickets are available! ({available_tickets} available)"
@@ -102,7 +107,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def auto_check_loop(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """
-    Checks the API every 30 seconds and sends a message only when tickets are available.
+    Runs every 30 seconds; checks API and sends a message only if tickets are available.
     """
     try:
         while True:
@@ -123,14 +128,26 @@ async def auto_check_loop(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     except Exception as e:
         logging.error("Error in auto check loop for chat %s: %s", chat_id, e)
 
-async def main():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+# Function to start the Telegram bot
+async def start_bot():
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    logging.info("Telegram bot is running...")
+    await application.run_polling()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_callback))
+# Create FastAPI app for binding to a port
+app = FastAPI()
 
-    logging.info("Bot is running... Press Ctrl+C to stop.")
-    await app.run_polling()
+@app.get("/", response_class=PlainTextResponse)
+async def root():
+    return "Bot is running."
+
+# On startup, run the Telegram bot in the background
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(start_bot())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT)
