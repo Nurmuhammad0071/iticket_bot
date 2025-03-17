@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 
 API_URL = "https://api.iticket.uz/ru/v5/events/concerts/uzbekistan-vs-kyrgyz-republic?client=web"
-TELEGRAM_BOT_TOKEN = "YOUR_TOKEN"
+TELEGRAM_BOT_TOKEN = "7619013796:AAGsMnnxSPl30BYTRUKBnomdU9VjFWngNBo"
 
 # Dictionary to store auto-check tasks by chat_id
 auto_check_tasks = {}
